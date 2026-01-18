@@ -31,29 +31,14 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else 
 
 app = FastAPI()
 
-origins = [
-    "https://turkey888855-cpu.github.io",
-    "https://turkey888855-cpu.github.io/adler-webapp",
-    # при тестах локально можно добавить:
-    # "http://localhost:5500",
-    # "http://127.0.0.1:5500",
-]
-
+# ПРОСТОЕ CORS: разрешаем любые источники (Origin).
+# Мы не используем куки/сессии, поэтому allow_credentials=False — безопасно.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],   # или ["GET", "POST"] если хочешь жёстче
-    allow_headers=["*"],
-)
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=False,       # куки не нужны
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],        # разрешить запросы с любого домена
+    allow_credentials=False,    # куки не нужны
+    allow_methods=["*"],        # любые методы (GET, POST, и т.д.)
+    allow_headers=["*"],        # любые заголовки
 )
 
 
