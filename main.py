@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 import httpx
@@ -27,19 +27,32 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL")          # URL WebApp (GitHub Pages)
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
 
 
-# ---------- FASTAPI + CORS ----------
+# ---------- FASTAPI + РУЧНОЙ CORS ----------
 
 app = FastAPI()
 
-# ПРОСТОЕ CORS: разрешаем любые источники (Origin).
-# Мы не используем куки/сессии, поэтому allow_credentials=False — безопасно.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],        # разрешить запросы с любого домена
-    allow_credentials=False,    # куки не нужны
-    allow_methods=["*"],        # любые методы (GET, POST, и т.д.)
-    allow_headers=["*"],        # любые заголовки
-)
+
+# Обработчик preflight-запросов OPTIONS для любых путей
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str, request: Request):
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
+
+
+# Middleware: добавляем CORS-заголовки ко всем ответам
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 
 # ---------- СОБЫТИЯ ПРИ СТАРТЕ ПРИЛОЖЕНИЯ ----------
