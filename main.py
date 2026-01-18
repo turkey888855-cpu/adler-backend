@@ -267,11 +267,33 @@ async def telegram_webhook(request: Request):
     full_name = (first_name + " " + last_name).strip()
 
     # Команда /start
+       
     if text == "/start":
-        await send_telegram_message(
-            chat_id,
-            "Привет! Бот запущен и работает. Потом здесь будет выбор туров и бронирование.",
-        )
+       
+        if WEBAPP_URL:
+            keyboard = {
+                "keyboard": [
+                    [
+                        {
+                            "text": "Открыть каталог туров",
+                            "web_app": {"url": WEBAPP_URL},
+                        }
+                    ]
+                ],
+                "resize_keyboard": True,
+                "one_time_keyboard": False,
+            }
+            await send_telegram_message(
+                chat_id,
+                "Привет! Нажмите кнопку ниже, чтобы открыть каталог туров.",
+                reply_markup=keyboard,
+            )
+        else:
+            # На случай, если WEBAPP_URL ещё не задан
+            await send_telegram_message(
+                chat_id,
+                "Привет! WebApp ещё не настроен.",
+            )
         return {"ok": True}
 
     # Тестовая команда для заявки
