@@ -179,6 +179,7 @@ def list_tours():
     return tours
 
 
+
 @app.post("/api/bookings")
 async def create_booking(payload: BookingCreate):
     """
@@ -187,62 +188,72 @@ async def create_booking(payload: BookingCreate):
     if engine is None:
         raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
 
-    # Проверим, что тур существует и активен
-    with engine.begin() as conn:
-        tour_row = conn.execute(
-            text(
-                """
-                SELECT id, title
-                FROM tours
-                WHERE id = :tour_id AND is_active = TRUE
-                """
-            ),
-            {"tour_id": payload.tour_id},
-        ).mappings().first()
+    try:
+        # Проверим, что тур существует и активен
+        with engine.begin() as conn:
+            tour_row = conn.execute(
+                text(
+                    """
+                    SELECT id, title
+                    FROM tours
+                    WHERE id = :tour_id AND is_active = TRUE
+                    """
+                ),
+                {"tour_id": payload.tour_id},
+            ).mappings().first()
 
-        if not tour_row:
-            raise HTTPException(status_code=400, detail="Invalid tour_id")
+            if not tour_row:
+                raise HTTPException(status_code=400, detail="Invalid tour_id")
 
-        # Вставляем заявку
-        result = conn.execute(
-            text(
-                """
-                INSERT INTO bookings (
-                    tour_id,
-                    telegram_user_id,
-                    telegram_username,
-                    client_name,
-                    client_phone,
-                    people_count,
-                    date_time,
-                    comment,
-                    status
-                ) VALUES (
-                    :tour_id,
-                    :telegram_user_id,
-                    :telegram_username,
-                    :client_name,
-                    :client_phone,
-                    :people_count,
-                    :date_time,
-                    :comment,
-                    'new'
-                )
-                RETURNING id
-                """
-            ),
-            {
-                "tour_id": payload.tour_id,
-                "telegram_user_id": payload.telegram_user_id,
-                "telegram_username": payload.telegram_username,
-                "client_name": payload.client_name,
-                "client_phone": payload.client_phone,
-                "people_count": payload.people_count,
-                "date_time": payload.date_time,
-                "comment": payload.comment,
-            },
-        )
-        booking_id = result.scalar()
+            # Вставляем заявку
+            result = conn.execute(
+                text(
+                    """
+                    INSERT INTO bookings (
+                        tour_id,
+                        telegram_user_id,
+                        telegram_username,
+                        client_name,
+                        client_phone,
+                        people_count,
+                        date_time,
+                        comment,
+                        status
+                    ) VALUES (
+                        :tour_id,
+                        :telegram_user_id,
+                        :telegram_username,
+                        :client_name,
+                        :client_phone,
+                        :people_count,
+                        :date_time,
+                        :comment,
+                        'new'
+                    )
+                    RETURNING id
+                    """
+                ),
+                {
+                    "tour_id": payload.tour_id,
+                    "telegram_user_id": payload.telegram_user_id,
+                    "telegram_username": payload.telegram_username,
+                    "client_name": payload.client_name,
+                    "client_phone": payload.client_phone,
+                    "people_count": payload.people_count,
+                    "date_time": payload.date_time,
+                    "comment": payload.comment,
+                },
+            )
+            booking_id = result.scalar()
+
+    except HTTPException:
+        # если мы сами кинули HTTPException выше — просто пробрасываем
+        raise
+    except Exception as e:
+        # ВРЕМЕННО: логируем и отдаём текст ошибки наружу,
+        # чтобы увидеть её в браузере
+        print("DB error in create_booking:", repr(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
     # Формируем текст для группы гидов
     tour_title = tour_row["title"]
@@ -263,7 +274,6 @@ async def create_booking(payload: BookingCreate):
     await notify_guides(guides_text)
 
     return {"ok": True, "booking_id": booking_id}
-
 
 # ---------- WEBHOOK TELEGRAM ----------
 
