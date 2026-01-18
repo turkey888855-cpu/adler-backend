@@ -1,3 +1,4 @@
+
 import os
 from datetime import datetime
 from typing import Optional, List
@@ -257,7 +258,7 @@ async def telegram_webhook(request: Request):
         )
         return {"ok": True}
 
-    # Тестовая команда для заявки (оставим, пригодится)
+    # Тестовая команда для заявки
     if text == "/testbooking":
         guides_text = (
             "🧪 Тестовая заявка\n"
