@@ -98,17 +98,22 @@ class BookingCreate(BaseModel):
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ TELEGRAM ----------
 
-async def send_telegram_message(chat_id: int, text: str):
+async def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] = None):
     """
     Отправить сообщение в Telegram.
     """
     if not BOT_TOKEN:
         return
 
+    # Формируем тело запроса
+    payload: dict = {"chat_id": chat_id, "text": text}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+
     async with httpx.AsyncClient() as client:
         await client.post(
             f"{TELEGRAM_API_URL}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
+            json=payload,
         )
 
 
