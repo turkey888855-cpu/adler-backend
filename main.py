@@ -1,8 +1,8 @@
-from fastapi.middleware.cors import CORSMiddleware
+
 import os
 from datetime import datetime
 from typing import Optional, List
-
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
