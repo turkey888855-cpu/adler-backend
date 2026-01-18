@@ -31,13 +31,16 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else 
 
 app = FastAPI()
 
-# Для MVP разрешаем запросы откуда угодно (потом можно ограничить доменом GitHub Pages)
-origins = ["*"]
+# Разрешаем запросы только с GitHub Pages (твой домен)
+origins = [
+    "https://turkey888855-cpu.github.io",
+    "https://turkey888855-cpu.github.io/",
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=False,       # куки не нужны
     allow_methods=["*"],
     allow_headers=["*"],
 )
