@@ -17,6 +17,8 @@ if DATABASE_URL:
 
 BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+GUIDES_CHAT_ID = os.environ.get("GUIDES_CHAT_ID")  # строка, приведём к int ниже
+
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
 
 
@@ -71,6 +73,21 @@ async def send_telegram_message(chat_id: int, text: str):
         )
 
 
+async def notify_guides(text: str):
+    """
+    Отправить сообщение в группу гидов.
+    """
+    if not BOT_TOKEN or not GUIDES_CHAT_ID:
+        return
+
+    try:
+        guides_chat_id = int(GUIDES_CHAT_ID)
+    except ValueError:
+        return
+
+    await send_telegram_message(guides_chat_id, text)
+
+
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     """
@@ -84,13 +101,43 @@ async def telegram_webhook(request: Request):
 
     chat = message.get("chat", {})
     chat_id = chat.get("id")
-    text = message.get("text", "")
+    text = message.get("text", "") or ""
+    from_user = message.get("from", {})
 
+    username = from_user.get("username")
+    first_name = from_user.get("first_name", "")
+    last_name = from_user.get("last_name", "")
+    full_name = (first_name + " " + last_name).strip()
+
+    # Команда /start
     if text == "/start":
         await send_telegram_message(
             chat_id,
             "Привет! Бот запущен и работает. Потом здесь будет выбор туров.",
         )
+        return {"ok": True}
 
-    # тут позже добавим другие команды
+    # Тестовая команда для заявки
+    if text == "/testbooking":
+        # Сообщение для группы гидов
+        guides_text = (
+            "🧪 Тестовая заявка\n"
+            f"От: {full_name or 'Без имени'}"
+            f"{' (@' + username + ')' if username else ''}\n"
+            f"chat_id: {chat_id}\n"
+            "\nЭто просто тест, настоящей брони нет."
+        )
+
+        await notify_guides(guides_text)
+
+        # Ответ клиенту
+        await send_telegram_message(
+            chat_id,
+            "Тестовая заявка отправлена в группу гидов.\n"
+            "Проверь свою группу гидов — там должно появиться сообщение.",
+        )
+        return {"ok": True}
+
+    # На всё остальное можно отвечать молчанием или текстом
+    # await send_telegram_message(chat_id, "Неизвестная команда. Напишите /start или /testbooking.")
     return {"ok": True}
