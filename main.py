@@ -27,7 +27,18 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else 
 
 
 app = FastAPI()
+app = FastAPI()
 
+# --- CORS, чтобы WebApp мог обращаться к API ---
+origins = ["*"]  # для MVP разрешаем всем, потом можно сузить до домена GitHub Pages
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def on_startup():
