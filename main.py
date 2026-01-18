@@ -1,9 +1,9 @@
-
 import os
 from datetime import datetime
 from typing import Optional, List
-from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 import httpx
@@ -17,20 +17,22 @@ if DATABASE_URL:
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
-# ---------- TELEGRAM БОТ ----------
+# ---------- TELEGRAM-БОТ И НАСТРОЙКИ ----------
 
 BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-GUIDES_CHAT_ID = os.environ.get("GUIDES_CHAT_ID")  # строка, приведём к int ниже
-WEBAPP_URL = os.environ.get("WEBAPP_URL")
+GUIDES_CHAT_ID = os.environ.get("GUIDES_CHAT_ID")  # строка, приведём к int
+WEBAPP_URL = os.environ.get("WEBAPP_URL")          # URL WebApp (GitHub Pages)
+
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
 
 
-app = FastAPI()
+# ---------- FASTAPI + CORS ----------
+
 app = FastAPI()
 
-# --- CORS, чтобы WebApp мог обращаться к API ---
-origins = ["*"]  # для MVP разрешаем всем, потом можно сузить до домена GitHub Pages
+# Для MVP разрешаем запросы откуда угодно (потом можно ограничить доменом GitHub Pages)
+origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +41,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------- СОБЫТИЯ ПРИ СТАРТЕ ПРИЛОЖЕНИЯ ----------
 
 @app.on_event("startup")
 async def on_startup():
@@ -52,6 +57,8 @@ async def on_startup():
                 params={"url": WEBHOOK_URL},
             )
 
+
+# ---------- ПРОСТЫЕ СИСТЕМНЫЕ ЭНДПОИНТЫ ----------
 
 @app.get("/")
 def read_root():
@@ -98,14 +105,17 @@ class BookingCreate(BaseModel):
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ TELEGRAM ----------
 
-async def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] = None):
+async def send_telegram_message(
+    chat_id: int,
+    text: str,
+    reply_markup: Optional[dict] = None,
+):
     """
     Отправить сообщение в Telegram.
     """
     if not BOT_TOKEN:
         return
 
-    # Формируем тело запроса
     payload: dict = {"chat_id": chat_id, "text": text}
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
@@ -266,10 +276,8 @@ async def telegram_webhook(request: Request):
     last_name = from_user.get("last_name", "")
     full_name = (first_name + " " + last_name).strip()
 
-    # Команда /start
-       
+    # ----- /start -----
     if text == "/start":
-       
         if WEBAPP_URL:
             keyboard = {
                 "keyboard": [
@@ -289,14 +297,13 @@ async def telegram_webhook(request: Request):
                 reply_markup=keyboard,
             )
         else:
-            # На случай, если WEBAPP_URL ещё не задан
             await send_telegram_message(
                 chat_id,
                 "Привет! WebApp ещё не настроен.",
             )
         return {"ok": True}
 
-    # Тестовая команда для заявки
+    # ----- /testbooking (тестовая заявка в группу) -----
     if text == "/testbooking":
         guides_text = (
             "🧪 Тестовая заявка\n"
