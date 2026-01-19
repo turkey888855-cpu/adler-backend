@@ -202,7 +202,7 @@ async def notify_guides(text: str):
     await send_telegram_message(guides_chat_id, text)
 
 
-# ---------- API ДЛЯ ТУРОВ И ЗАЯВОК (публичная часть) ----------
+# ---------- ПУБЛИЧНОЕ API ДЛЯ ТУРОВ И ЗАЯВОК ----------
 
 @app.get("/api/tours", response_model=List[TourOut])
 def list_tours():
@@ -296,7 +296,7 @@ async def create_booking(payload: BookingCreate):
     except HTTPException:
         raise
     except Exception as e:
-        # ВРЕМЕННО: логируем и отдаём текст ошибки наружу, чтобы видеть проблему
+        # ВРЕМЕННО: логируем и отдаём текст ошибки наружу, чтобы увидеть её в браузере
         print("DB error in create_booking:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -374,4 +374,181 @@ def admin_update_tour(tour_id: int, data: TourUpdate, admin=Depends(require_admi
     Обновить тур (название, описание, цену, длительность, активность).
     """
     if engine is None:
-        raise HTTPException(status_code=500, detail="DATABASE_URL 
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
+
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    set_parts = [f"{key} = :{key}" for key in fields.keys()]
+    sql = f"""
+        UPDATE tours
+        SET {', '.join(set_parts)}
+        WHERE id = :tour_id
+        RETURNING id, title, type, description, price_from, duration_hours
+    """
+    params = {**fields, "tour_id": tour_id}
+
+    with engine.begin() as conn:
+        result = conn.execute(text(sql), params)
+        row = result.mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Tour not found")
+    return dict(row)
+
+
+@app.delete("/admin/tours/{tour_id}")
+def admin_delete_tour(tour_id: int, admin=Depends(require_admin)):
+    """
+    Мягкое удаление: делаем тур неактивным.
+    """
+    if engine is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
+
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("UPDATE tours SET is_active = FALSE WHERE id = :tour_id"),
+            {"tour_id": tour_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Tour not found")
+    return {"ok": True}
+
+
+# ---------- АДМИН: ЗАЯВКИ ----------
+
+@app.get("/admin/bookings", response_model=List[BookingOut])
+def admin_list_bookings(
+    status: Optional[str] = None,
+    admin=Depends(require_admin),
+):
+    """
+    Список заявок. Можно фильтровать по status (new / confirmed / cancelled / done).
+    """
+    if engine is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
+
+    base_sql = """
+        SELECT
+            b.id,
+            b.tour_id,
+            t.title AS tour_title,
+            b.client_name,
+            b.client_phone,
+            b.people_count,
+            b.date_time,
+            b.comment,
+            b.status
+        FROM bookings b
+        JOIN tours t ON t.id = b.tour_id
+    """
+    params: dict = {}
+    if status:
+        base_sql += " WHERE b.status = :status"
+        params["status"] = status
+    base_sql += " ORDER BY b.date_time DESC, b.id DESC"
+
+    with engine.connect() as conn:
+        result = conn.execute(text(base_sql), params)
+        rows = [dict(row._mapping) for row in result]
+    return rows
+
+
+@app.patch("/admin/bookings/{booking_id}")
+def admin_update_booking(
+    booking_id: int,
+    data: BookingUpdate,
+    admin=Depends(require_admin),
+):
+    """
+    Обновить заявку (например, статус: new / confirmed / cancelled / done).
+    """
+    if engine is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
+
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    set_parts = [f"{key} = :{key}" for key in fields.keys()]
+    sql = f"UPDATE bookings SET {', '.join(set_parts)} WHERE id = :booking_id"
+    params = {**fields, "booking_id": booking_id}
+
+    with engine.begin() as conn:
+        result = conn.execute(text(sql), params)
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Booking not found")
+
+    return {"ok": True}
+
+
+# ---------- WEBHOOK TELEGRAM ----------
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Обработчик вебхука Telegram.
+    """
+    update = await request.json()
+
+    message = update.get("message") or update.get("edited_message")
+    if not message:
+        return {"ok": True}
+
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
+    text = message.get("text", "") or ""
+    from_user = message.get("from", {})
+
+    username = from_user.get("username")
+    first_name = from_user.get("first_name", "")
+    last_name = from_user.get("last_name", "")
+    full_name = (first_name + " " + last_name).strip()
+
+    # ----- /start -----
+    if text == "/start":
+        if WEBAPP_URL:
+            keyboard = {
+                "keyboard": [
+                    [
+                        {
+                            "text": "Открыть каталог туров",
+                            "web_app": {"url": WEBAPP_URL},
+                        }
+                    ]
+                ],
+                "resize_keyboard": True,
+                "one_time_keyboard": False,
+            }
+            await send_telegram_message(
+                chat_id,
+                "Привет! Нажмите кнопку ниже, чтобы открыть каталог туров.",
+                reply_markup=keyboard,
+            )
+        else:
+            await send_telegram_message(
+                chat_id,
+                "Привет! WebApp ещё не настроен.",
+            )
+        return {"ok": True}
+
+    # ----- /testbooking (тестовая заявка в группу) -----
+    if text == "/testbooking":
+        guides_text = (
+            "🧪 Тестовая заявка\n"
+            f"От: {full_name or 'Без имени'}"
+            f"{' (@' + username + ')' if username else ''}\n"
+            f"chat_id: {chat_id}\n"
+            "\nЭто просто тест, настоящей брони нет."
+        )
+
+        await notify_guides(guides_text)
+
+        await send_telegram_message(
+            chat_id,
+            "Тестовая заявка отправлена в группу гидов.\n"
+            "Проверьте группу — там должно появиться сообщение.",
+        )
+        return {"ok": True}
+
+    return {"ok": True}
