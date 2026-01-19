@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Request Depends
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
@@ -23,7 +23,8 @@ BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 GUIDES_CHAT_ID = os.environ.get("GUIDES_CHAT_ID")  # строка, приведём к int
 WEBAPP_URL = os.environ.get("WEBAPP_URL")          # URL WebApp (GitHub Pages)
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")  # токен для админ-панели
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")        # токен для админ-панели
+
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
 
 
@@ -39,7 +40,7 @@ async def options_handler(full_path: str, request: Request):
         status_code=200,
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
             "Access-Control-Allow-Headers": "*",
         },
     )
@@ -50,9 +51,20 @@ async def options_handler(full_path: str, request: Request):
 async def add_cors_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "*"
     return response
+
+
+# ---------- АВТОРИЗАЦИЯ АДМИНА ----------
+
+def require_admin(request: Request):
+    """
+    Простая авторизация по заголовку X-Admin-Token.
+    """
+    token = request.headers.get("X-Admin-Token")
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 # ---------- СОБЫТИЯ ПРИ СТАРТЕ ПРИЛОЖЕНИЯ ----------
@@ -115,6 +127,42 @@ class BookingCreate(BaseModel):
     telegram_username: Optional[str] = None
 
 
+# --- модели для админки ---
+
+class TourCreate(BaseModel):
+    title: str
+    type: str
+    description: Optional[str] = None
+    price_from: Optional[float] = None
+    duration_hours: Optional[int] = None
+    is_active: bool = True
+
+
+class TourUpdate(BaseModel):
+    title: Optional[str] = None
+    type: Optional[str] = None
+    description: Optional[str] = None
+    price_from: Optional[float] = None
+    duration_hours: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class BookingOut(BaseModel):
+    id: int
+    tour_id: int
+    tour_title: str
+    client_name: str
+    client_phone: str
+    people_count: int
+    date_time: datetime
+    comment: Optional[str] = None
+    status: str
+
+
+class BookingUpdate(BaseModel):
+    status: Optional[str] = None
+
+
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ TELEGRAM ----------
 
 async def send_telegram_message(
@@ -154,7 +202,7 @@ async def notify_guides(text: str):
     await send_telegram_message(guides_chat_id, text)
 
 
-# ---------- API ДЛЯ ТУРОВ И ЗАЯВОК ----------
+# ---------- API ДЛЯ ТУРОВ И ЗАЯВОК (публичная часть) ----------
 
 @app.get("/api/tours", response_model=List[TourOut])
 def list_tours():
@@ -177,7 +225,6 @@ def list_tours():
         )
         tours = [dict(row._mapping) for row in result]
     return tours
-
 
 
 @app.post("/api/bookings")
@@ -247,11 +294,9 @@ async def create_booking(payload: BookingCreate):
             booking_id = result.scalar()
 
     except HTTPException:
-        # если мы сами кинули HTTPException выше — просто пробрасываем
         raise
     except Exception as e:
-        # ВРЕМЕННО: логируем и отдаём текст ошибки наружу,
-        # чтобы увидеть её в браузере
+        # ВРЕМЕННО: логируем и отдаём текст ошибки наружу, чтобы видеть проблему
         print("DB error in create_booking:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -275,73 +320,58 @@ async def create_booking(payload: BookingCreate):
 
     return {"ok": True, "booking_id": booking_id}
 
-# ---------- WEBHOOK TELEGRAM ----------
 
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
+# ---------- АДМИН: ТУРЫ ----------
+
+@app.get("/admin/tours", response_model=List[TourOut])
+def admin_list_tours(admin=Depends(require_admin)):
     """
-    Обработчик вебхука Telegram.
+    Список всех туров (включая неактивные).
     """
-    update = await request.json()
+    if engine is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
 
-    message = update.get("message") or update.get("edited_message")
-    if not message:
-        return {"ok": True}
-
-    chat = message.get("chat", {})
-    chat_id = chat.get("id")
-    text = message.get("text", "") or ""
-    from_user = message.get("from", {})
-
-    username = from_user.get("username")
-    first_name = from_user.get("first_name", "")
-    last_name = from_user.get("last_name", "")
-    full_name = (first_name + " " + last_name).strip()
-
-    # ----- /start -----
-    if text == "/start":
-        if WEBAPP_URL:
-            keyboard = {
-                "keyboard": [
-                    [
-                        {
-                            "text": "Открыть каталог туров",
-                            "web_app": {"url": WEBAPP_URL},
-                        }
-                    ]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": False,
-            }
-            await send_telegram_message(
-                chat_id,
-                "Привет! Нажмите кнопку ниже, чтобы открыть каталог туров.",
-                reply_markup=keyboard,
+    with engine.connect() as conn:
+        result = conn.execute(
+            text(
+                """
+                SELECT id, title, type, description, price_from, duration_hours
+                FROM tours
+                ORDER BY id
+                """
             )
-        else:
-            await send_telegram_message(
-                chat_id,
-                "Привет! WebApp ещё не настроен.",
-            )
-        return {"ok": True}
-
-    # ----- /testbooking (тестовая заявка в группу) -----
-    if text == "/testbooking":
-        guides_text = (
-            "🧪 Тестовая заявка\n"
-            f"От: {full_name or 'Без имени'}"
-            f"{' (@' + username + ')' if username else ''}\n"
-            f"chat_id: {chat_id}\n"
-            "\nЭто просто тест, настоящей брони нет."
         )
+        tours = [dict(row._mapping) for row in result]
+    return tours
 
-        await notify_guides(guides_text)
 
-        await send_telegram_message(
-            chat_id,
-            "Тестовая заявка отправлена в группу гидов.\n"
-            "Проверьте группу — там должно появиться сообщение.",
+@app.post("/admin/tours", response_model=TourOut)
+def admin_create_tour(data: TourCreate, admin=Depends(require_admin)):
+    """
+    Создать новый тур.
+    """
+    if engine is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
+
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                INSERT INTO tours (title, type, description, price_from, duration_hours, is_active)
+                VALUES (:title, :type, :description, :price_from, :duration_hours, :is_active)
+                RETURNING id, title, type, description, price_from, duration_hours
+                """
+            ),
+            data.model_dump(),
         )
-        return {"ok": True}
+        row = result.mappings().first()
+    return dict(row)
 
-    return {"ok": True}
+
+@app.patch("/admin/tours/{tour_id}", response_model=TourOut)
+def admin_update_tour(tour_id: int, data: TourUpdate, admin=Depends(require_admin)):
+    """
+    Обновить тур (название, описание, цену, длительность, активность).
+    """
+    if engine is None:
+        raise HTTPException(status_code=500, detail="DATABASE_URL 
