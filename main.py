@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
@@ -23,7 +23,7 @@ BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 GUIDES_CHAT_ID = os.environ.get("GUIDES_CHAT_ID")  # строка, приведём к int
 WEBAPP_URL = os.environ.get("WEBAPP_URL")          # URL WebApp (GitHub Pages)
-
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")  # токен для админ-панели
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else None
 
 
